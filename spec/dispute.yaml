@@ -1,0 +1,1072 @@
+swagger: '2.0'
+info:
+  title: YapStone Dispute Composite Service
+  description: |
+    This service provides a dispute engine that enables a marketplace to manage disputes and dispute-related objects such as evidence data on processed payments.
+
+    ---
+
+    # Overview
+
+    In general, most disputes are initiated by the cardholder regarding products, services, or merchant issues. Cardholder disputes usually result in chargebacks.
+
+    A dispute occurs when a cardholder does not agree with the charge and subsequently disputes the payment with the card issuer. The card issuer creates a formal dispute against the charge either on behalf or at the request of the cardholder, and reverses the payment.
+
+    ## Dispute Resolution Process
+
+    Yapstone provides a dispute resolution service by offering a comprehensive set of APIs, notifications, and up-to-date information about the dispute which enable you to resolve disputes quickly and efficiently. You can receive dispute-related information such as reason codes, processor reason codes, transaction information, time to respond and required documents (evidence). This automated service can be especially useful when dealing with a high volume of disputes.
+
+    The following is our recommended process for working on a dispute resolution:
+
+    1. Get notified about a new dispute by receiving a dispute notification - You receive notifications about disputes and updates to existing disputes by listening to a webhook.
+    2. Decide to accept or contest the received dispute - Yapstone assumes that you will contest a dispute by providing relevant evidence documents. If you choose otherwise, you accept the liability.
+    3. Work on disputes - You can choose to work on disputes by providing supporting documentation, adding relevant information on the dispute and taking an action on the dispute. Subsequently, Yapstone works with downstream processors including networks based on the dispute cycle, and eventually informs you about the final disposition of the dispute.
+
+     ## Using the Dispute Management Service
+     Yapstone provides you with a set of APIs to help resolve customer disputes by contesting received charge backs. Currently, the Dispute Management Service includes the following APIs:
+     * Obtain information about a specific dispute from the Yapstone system (**Get Dispute**)
+     * Performing a defined action on a dispute such as accepting it without contest (**Take Action**)
+     * Obtaining events associated with a specific dispute (**Get Events**)
+     * Adding or updating dispute evidence either by submitted files or text notes (**Evidence**)
+     * Create a dispute on demand for testing purposes only (**Create Dispute**)
+
+
+    ---
+  version: v1
+  contact:
+    email: cbkdev@yapstone.com
+
+produces:
+  - application/json
+consumes:
+  - application/json
+securityDefinitions:
+  Bearer:
+    type: apiKey
+    name: Authorization
+    in: header
+    description: |
+      Bearer authorization
+basePath: /dispute-composite/api/v1
+
+paths:
+  /disputes:
+    post:
+      tags: ['disputes']
+      summary: Create a dispute [Test Only]
+      description:  |
+        A test harness API to create a dispute.
+
+        ---
+
+        # Overview
+        The Create Dispute API allows you to create disputes on demand to test out **ONLY** in the testing environment. Please remember that this is a one-off event API created only for testing purposes and is not part of the regularly supported APIs by Yapstone.
+
+        ## Test Reason Codes
+
+        Please use the following reason codes based on the card type:
+
+         | Category | Card Brand | Processor Code | Reason Code | Description |
+         | ------- | --------| --------| --------| --------|
+         | FRAUDULENT   | VISA   | 1020   | 10.2   | EMV liability shift non-counterfeit fraud   |
+         | FRAUDULENT  | VISA   | 1050   | 10.5   | Visa fraud monitoring program   |
+         | DUPLICATE_OR_MULTIPLE_TXN   | VISA   | 1261   | 12.6.1   | Duplicate processing   |
+         | UNKNOWN_OR_REVIEW_REQUIRED   | MASTERCARD &nbsp;  |&nbsp; 46   | 4846   | Currency errors   |
+         | FRAUDULENT   | MASTERCARD &nbsp;  |&nbsp; 49   | 4849   | Questionable merchant activity (card acceptor claims to be listed on security bulletin)   |
+         | NOT_RECEIVED   | MASTERCARD &nbsp;  |&nbsp; 55   | 4855   | Goods or services not received   |
+         | DUPLICATE_OR_MULTIPLE_TXN   | DISCOVER   | 4534   | DP   | Duplicate processing   |
+         | NOT_AS_DESCRIBED_OR_DEFECTIVE  &nbsp;&nbsp; | DISCOVER   | 4553   | RM   | Quality of goods or services dispute   |
+         | UNKNOWN_OR_REVIEW_REQUIRED   | DISCOVER   | 4753   | IN   | Invalid card number   |
+
+      operationId: createDispute
+      security:
+        - Bearer: []
+      parameters:
+        - name: request
+          in: body
+          description: New dispute entity to be created.
+          required: true
+          schema:
+            $ref: '#/definitions/CompositeDispute'
+      responses:
+        '201':
+          description: Success.
+          schema:
+            $ref: '#/definitions/CompositeDispute'
+        '400':
+          description: Bad request.
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized.
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found.
+          schema:
+            $ref: '#/definitions/Errors'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/Errors'
+
+  /disputes/{id}:
+    get:
+      tags: ['disputes']
+      summary: Fetch a single dispute
+      description: |
+        Returns the dispute detail and status history for the given `disputeId`.
+
+
+        ---
+        # Overview
+
+        Returns the dispute detail and status history for the given `disputeId`. Upon receiving a notification from Yapstone about a raised dispute by the issuer and an associated chargeback, you can obtain the relevant information by using the retrieving dispute API with the dispute id as path parameter.
+
+        **Note:**
+        * American Express does not use the arn (Acquirer Reference Number) field like First Data, but it uses the caseNumbers fields.
+        * First Data on the other hand, does not use the caseNumbers field like American Express, but it uses the arn field.
+
+
+
+      operationId: getDispute
+      security:
+        - Bearer: []
+      parameters:
+        - in: path
+          name: id
+          description: Primary key for a single dispute record (assigned by YapStone).
+          required: true
+          type: string
+          maxLength: 64
+      responses:
+        '200':
+          description: Success.
+          schema:
+            $ref: '#/definitions/CompositeDispute'
+        '400':
+          description: Bad request.
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found.
+          schema:
+            $ref: '#/definitions/Errors'
+        '500':
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/Errors'
+
+  /disputes/{id}/action:
+    patch:
+      tags: ['disputes']
+      summary: Action to perform on the dispute - two values are supported - ACCEPT or CONTEST.
+      description:  |
+        Action to perform on the dispute - two values are supported - ACCEPT or CONTEST.
+
+        ---
+
+        # Contesting a Dispute or Accepting Liability Without Contesting
+
+        Once you receive a notification from Yapstone about a pending dispute, or at any other times when obtaining dispute details, you might choose to accept its liability without contesting.
+
+        An accept action can be performed before or on the dispute response due date (responseDueDate) set for the dispute, either with or without previously submitted evidence. However, the accept action is irreversible; that is, once you accepted the liability, you cannot contest the dispute.
+
+        If you specify a Contest action, you should have provided evidence of at least one type: either a file or a text note.
+
+        You can take an action either Accept or Contest only when the dispute status is EVIDENCE_REQUESTED.
+
+        **Note:** Once you submit an action (Accept or Contest), you cannot request another action for the same dispute workflow status (for example: RETRIEVAL_REQUEST).
+
+        ## Error Reporting
+
+        This API will report an error in the following scenarios:
+        * You provide an invalid disputeId.
+        * The syntax of the call is incorrect.
+        * The dispute action is neither ACCEPT nor CONTEST.
+        * The action is taken after the response due date or the status is not EVIDENCE_REQUESTED.
+
+
+        ---
+
+
+
+      operationId: actionByDisputeId
+      security:
+        - Bearer: []
+      parameters:
+        - in: path
+          name: id
+          description: Primary key for a single dispute record (assigned by YapStone).
+          required: true
+          type: string
+          maxLength: 64
+        - name: request
+          in: body
+          description: Action to be patched.
+          required: true
+          schema:
+            $ref: '#/definitions/ActionPatchRequest'
+      responses:
+        '204':
+          description: No content.
+        '400':
+          description: Bad request.
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized.
+          schema:
+            $ref: '#/definitions/Errors'
+        '403':
+          description: Forbidden.
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found.
+          schema:
+            $ref: '#/definitions/Errors'
+        '422':
+          description: Unprocessable Entity
+          schema:
+            $ref: '#/definitions/Errors'
+        '500':
+          description: Internal server error.
+          schema:
+            $ref: '#/definitions/Errors'
+
+
+  /disputes/{id}/events:
+    get:
+      tags: ['disputes']
+      summary: Fetch the dispute events associated with a dispute.
+      description: |
+        Returns the dispute events associated with a dispute.
+
+        ---
+
+        # Overview
+
+        Upon receiving a notification from Yapstone about a raised dispute by the issuer and an associated chargeback, you can obtain the relevant information by using the retrieving dispute API with the dispute id as path parameter.
+
+        Note:
+        * American Express does not use the arn (Acquirer Reference Number) field like First Data, but it uses the caseNumbers field.
+        * First Data on the other hand, does not use the caseNumbers field like American Express, but it uses the arn field.
+
+
+      operationId: getDisputeEvents
+      security:
+        - Bearer: []
+      parameters:
+        - in: path
+          name: id
+          description: Primary key for a single dispute record (assigned by YapStone).
+          required: true
+          type: string
+          maxLength: 64
+        - $ref: '#/parameters/offset'
+        - $ref: '#/parameters/limit'
+      responses:
+        '200':
+          description: Success.
+          schema:
+            $ref: '#/definitions/CompositeDisputeEventPagedResponse'
+        '400':
+          description: Bad request.
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized.
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found.
+          schema:
+            $ref: '#/definitions/Errors'
+        default:
+          description: Unexpected Error
+          schema:
+            $ref: '#/definitions/Errors'
+
+  /evidences/{id}/files:
+    post:
+      tags: ['evidences']
+      summary: Update a dispute evidences
+      operationId: createFile
+      consumes:
+        - multipart/form-data
+      security:
+        - Bearer: []
+      parameters:
+        - in: path
+          name: id
+          description: Primary key for a single evidence record (assigned by YapStone).
+          required: true
+          type: string
+          maxLength: 64
+        - name: evidenceCategory
+          in: formData
+          required: true
+          type: string
+          enum: &EVIDENCE_CATEGORY
+            - CANCELLATION
+            - CHARGE
+            - REFUND
+            - SHIPPING
+            - SIGNATURE
+            - USAGE
+        - name: evidenceType
+          in: formData
+          required: true
+          type: string
+          enum: &EVIDENCE_TYPE
+            - ACCESS_LOG
+            - COMMUNICATION
+            - DISCLOSURE
+            - DOCUMENTATION
+            - EXPLANATION_LETTER
+            - RECEIPT
+        - name: file
+          in: formData
+          description: file to upload
+          required: true
+          type: file
+        - name: note
+          in: formData
+          description: Text note for file evidence.
+          type: string
+        - name: wizardStep
+          in: formData
+          description: Wizard step in portal for which this evidence is being uploaded.
+          type: string
+        - name: documentType
+          in: formData
+          description: The type of document being uploaded as evidence.
+          type: string
+        - name: finalEvidence
+          in: formData
+          description: Indicates whether the submitted evidence is final or not.
+          type: boolean
+          default: true
+      responses:
+        '201':
+          description: Created
+          schema:
+            $ref: '#/definitions/CompositeFileEvidence'
+        '400':
+          description: Bad request
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/Errors'
+        '409':
+          description: Conflict
+          schema:
+            $ref: '#/definitions/Errors'
+        default:
+          description: Unexpected Error
+          schema:
+            $ref: '#/definitions/Errors'
+
+  /evidences/{id}/text:
+    post:
+      tags: ['evidences']
+      summary: Update a dispute evidences.
+      operationId: createText
+      security:
+        - Bearer: []
+      parameters:
+        - in: path
+          name: id
+          description: Primary key for a single evidence record (assigned by YapStone).
+          required: true
+          type: string
+          maxLength: 64
+        - name: request
+          in: body
+          description: Text evidence to be created.
+          required: true
+          schema:
+            $ref: '#/definitions/CompositeTextEvidence'
+      responses:
+        '201':
+          description: Created
+          schema:
+            $ref: '#/definitions/CompositeTextEvidence'
+        '400':
+          description: Bad request.
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized.
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found.
+          schema:
+            $ref: '#/definitions/Errors'
+        '409':
+          description: Conflict.
+          schema:
+            $ref: '#/definitions/Errors'
+        '422':
+          description: Unprocessable Entity.
+          schema:
+            $ref: '#/definitions/Errors'
+        default:
+          description: Unexpected Error
+          schema:
+            $ref: '#/definitions/Errors'
+
+
+  /evidences/{id}:
+    get:
+      tags: ['evidences']
+      summary: Get a submitted piece of evidence using its identifier.
+      description: |
+        Get a submitted piece of evidence using its identifier.
+
+        ---
+
+        # Overview
+        If you want to obtain a submitted earlier piece of evidence, use the Get Evidence API request with the file id as the path parameter. It allows you to retrieve evidence by its identifier.
+
+        This API request returns a complete set of your files and text notes provided as evidence for the associated dispute, along with their submission dates in chronological order. However, a single API request limits the response to ten pages of information.
+
+        ## Error Reporting
+
+        This API will report an error in the following scenarios:
+
+        * The evidence Id is not valid.
+        * The evidence is not associated with your marketplace
+
+
+
+        ---
+
+      operationId: getEvidence
+      security:
+        - Bearer: []
+      parameters:
+        - in: path
+          name: id
+          description: Id of the evidence file.
+          required: true
+          type: string
+          maxLength: 64
+      responses:
+        '200':
+          description: Success.
+          schema:
+            $ref: '#/definitions/CompositeEvidenceResponse'
+        '400':
+          description: Bad request.
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized.
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found.
+          schema:
+            $ref: '#/definitions/Errors'
+        default:
+          description: Unexpected Error
+          schema:
+            $ref: '#/definitions/Errors'
+
+  /files/{id}/content:
+    get:
+      tags: ['evidences']
+      summary: Get file content by file evidence id.
+      description: |
+        Returns the content of an evidence file.
+
+        ---
+
+        # Overview
+        If you want to obtain a submitted earlier piece of evidence, use the Get File API request file id as the path parameter. It allows you to retrieve evidence by its identifier.
+
+        ## Response Example
+
+        A successful call returns the content of the specified file evidence as a stream and displays it in your browser. Also, the response header gives you information about the file you are retrieving, such as file size and file type, as in the following example:
+
+          content-length: 20355
+          content-type: image/jpeg
+          status: 200
+
+         ## Error Reporting
+
+         This API reports an error in the following scenarios:
+
+         * The file Id is not valid.
+         * You are trying to retrieve content that is out of scope of your marketplace.
+
+
+        ---
+
+
+
+
+
+
+      operationId: getFileContentById
+      produces:
+        - application/*
+      parameters:
+        - name: id
+          in: path
+          description: File evidence id.
+          required: true
+          type: string
+      responses:
+        200:
+          description: Success.
+          schema:
+            $ref: '#/definitions/FileContentResponse'
+        404:
+          description: Not Found.
+          schema:
+            $ref: '#/definitions/Errors'
+        default:
+          description: Unexpected Error.
+          schema:
+            $ref: '#/definitions/Errors'
+      security:
+        - Bearer: []
+
+  /files/{id}:
+    delete:
+      tags: ['evidences']
+      summary: Get the evidence by it's id
+      description: |
+        Get the evidence by it's id
+      operationId: deleteFile
+      security:
+        - Bearer: []
+      parameters:
+        - in: path
+          name: id
+          description: Id of the file
+          required: true
+          type: string
+          maxLength: 64
+      responses:
+        '204':
+          description: Success
+        '400':
+          description: Bad request
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found
+          schema:
+            $ref: '#/definitions/Errors'
+        default:
+          description: Unexpected Error
+          schema:
+            $ref: '#/definitions/Errors'
+
+  /text/{id}:
+    delete:
+      tags: ['evidences']
+      summary: Delete the evidence according to id.
+      description: This API request allows you to delete an evidence file from the Yapstone system using the file Id as the path parameter. A successful request confirms the file deletion by the 204 response code. The API reports an error if the file Id is not valid or you are trying to delete a file already linked to a contested piece of evidence or you are trying to delete a file for the dispute that is not in EVIDENCE_REQUESTED state or your are trying to delete a file that has already been deleted.
+      operationId: deleteText
+      security:
+        - Bearer: []
+      parameters:
+        - in: path
+          name: id
+          description: Id of the evidence file.
+          required: true
+          type: string
+          maxLength: 64
+      responses:
+        '204':
+          description: Success.
+        '400':
+          description: Bad request.
+          schema:
+            $ref: '#/definitions/Errors'
+        '401':
+          description: Unauthorized.
+          schema:
+            $ref: '#/definitions/Errors'
+        '404':
+          description: Not found.
+          schema:
+            $ref: '#/definitions/Errors'
+        default:
+          description: Unexpected Error
+          schema:
+            $ref: '#/definitions/Errors'
+
+parameters:
+  limit:
+    name: "limit"
+    in: "query"
+    description: "Maximum number of items to return"
+    type: "integer"
+    default: "10"
+  offset:
+    name: "offset"
+    in: "query"
+    description: "Offset to start returning items at"
+    type: "integer"
+    default: "0"
+
+definitions:
+  CompositeReason:
+    type: object
+    description: Represents dispute reason.
+    required:
+      - processorCode
+      - normalizedCode
+    properties:
+      processorCode:
+        description: Payment processor reason code.
+        type: string
+        x-validation-required-message: "{DI038}"
+      normalizedCode:
+        description: Network / normalized reason code.
+        type: string
+        x-validation-required-message: "{DI039}"
+      category:
+        description: Category of the reason code.
+        type: string
+        default: NOT_SPECIFIED
+        enum:
+          - CREDIT_NOT_PROCESSED
+          - DUPLICATE_OR_MULTIPLE_TXN
+          - FRAUDULENT
+          - INCORRECT_TXN_AMOUNT
+          - NOT_AS_DESCRIBED_OR_DEFECTIVE
+          - NOT_RECEIVED
+          - POTENTIAL_CHARGEBACK_NOTICE
+          - UNKNOWN_OR_REVIEW_REQUIRED
+          - UNRECOGNIZED
+          - NOT_SPECIFIED
+      description:
+        description: Reason code description / reason code definition.
+        type: string
+
+  CompositeEvidence:
+    type: object
+    x-abstract-class: true
+    discriminator: evidence
+    properties:
+      id:
+        type: string
+        readOnly: true
+        description: Id of the created evidence.
+        x-validation-read-only-message: "{DI012}"
+      type:
+        description: Type of the evidence.
+        default: TEXT
+        enum:
+          - FILE
+          - TEXT
+      disputeWorkflow:
+        type: string
+        description: Dispute workflow cycle.
+        readOnly: true
+
+  CompositeEvidenceResponse:
+    type: object
+    properties:
+      id:
+        type: string
+      documents:
+        type: array
+        items:
+          $ref: '#/definitions/CompositeEvidence'
+
+  CompositeFileEvidence:
+    allOf:
+      - $ref: '#/definitions/CompositeEvidence'
+      - type: object
+        description: Represents evidence of file type that's used to dispute an evidence.
+        required:
+          - fileName
+          - evidenceCategory
+          - evidenceType
+        properties:
+          fileName:
+            type: string
+          evidenceCategory:
+            description: Cateogry of the file that's being uploaded as an evidence.
+            type: string
+            enum: *EVIDENCE_CATEGORY
+          evidenceType:
+            description: Represents type of EvidenceFile object.
+            type: string
+            enum: *EVIDENCE_TYPE
+          documentType:
+            description: (Optional) Describes the type of the file evidence e.g. Government Id.
+            type: string
+          note:
+            type: string
+            description: Text note for file evidence.
+          wizardStep:
+            type: string
+            description: Wizard step in portal for which this evidence is being uploaded.
+          finalEvidence:
+            type: boolean
+            description: Indicates whether the submitted evidence is final or not.
+  CompositeTextEvidence:
+    allOf:
+      - $ref: '#/definitions/CompositeEvidence'
+      - type: object
+        description: Represents an evidence of type text.
+        required:
+          - content
+        properties:
+          content:
+            type: string
+            description: Text content.
+          wizardStep:
+            type: string
+            description: Wizard step in portal for which this evidence is being uploaded.
+          finalEvidence:
+            type: boolean
+            description: Indicates whether the submitted evidence is final or not.
+        example:
+          content: "File content with multiple lines"
+
+  Amount:
+    type: object
+    description: Amount
+    required:
+      - currency
+      - exponent
+      - value
+    properties:
+      currency:
+        type: string
+        x-validation-required-message: "{DI033}"
+      exponent:
+        type: integer
+        format: int32
+        x-validation-required-message: "{DI034}"
+      value:
+        type: integer
+        format: int64
+        x-validation-required-message: "{DI035}"
+
+  PaymentCard:
+    type: object
+    required:
+      - type
+      - brand
+    properties:
+      type:
+        type: string
+        x-validation-required-message: "{DI036}"
+      brand:
+        type: string
+        x-validation-required-message: "{DI037}"
+
+  OriginalTransaction:
+    type: object
+    description: Original transaction that was disputed.
+    required:
+      - paymentId
+    properties:
+      id:
+        type: string
+      paymentId:
+        type: string
+        x-validation-required-message: "{DI040.2}"
+      clientUniqueTransactionId:
+        type: string
+      amount:
+        $ref: '#/definitions/Amount'
+      paymentCard:
+        $ref: '#/definitions/PaymentCard'
+      createdOn:
+        type: string
+        format: date-time
+
+  CompositeDisputeEventPagedResponse:
+    allOf:
+      - $ref: '#/definitions/RestResponse'
+      - type: object
+        properties:
+          events:
+            type: array
+            items:
+              $ref: '#/definitions/CompositeDisputeEvent'
+
+  CompositeDispute:
+    type: object
+    description: Represents single dispute object
+    required:
+      - disputeWorkflow
+    properties:
+      id:
+        type: string
+      arn:
+        description: Acquirer reference number references the transaction in acquiring processor.
+        type: string
+      caseNumbers:
+        description: Case numbers reported by the processor.
+        type: array
+        items:
+          type: string
+      evidenceId:
+        type: string
+      action:
+        type: string
+        enum: &DISPUTE_ACTION
+          - ACCEPT
+          - CONTEST
+      status:
+        type: string
+        enum:
+          - NEW
+          - EVIDENCE_REQUESTED
+          - EVIDENCE_RECEIVED
+          - ADDITIONAL_EVIDENCE_REQUESTED
+          - DECISION_PENDING
+          - EXPIRED
+          - CLOSED
+      statusUpdatedOn:
+        type: string
+        format: date-time
+      disputeAmount:
+        $ref: '#/definitions/Amount'
+      disputeWorkflow:
+        type: string
+        description: Status of the dispute at the card scheme.
+        x-validation-required-message: "{DI040.1}"
+        enum: &DISPUTE_WORKFLOW
+          - ARBITRATION
+          - CHARGEBACK
+          - CHARGEBACK_CANCEL
+          - CHARGEBACK_CREDIT
+          - COMPLIANCE
+          - FIRST_CHARGEBACK
+          - INQUIRY
+          - PRE_ARBITRATION
+          - PRE_COMPLIANCE
+          - REPRESENTMENT
+          - REPRESENTMENT_REJECT
+          - RETRIEVAL_REQUEST
+          - SECOND_CHARGEBACK
+          - UNKNOWN
+      finalDisposition:
+        type: string
+        enum: &DISPUTE_FINAL_DISPOSITION
+          - WON
+          - LOST
+      dispositionReason:
+        description: Final disposition reason.
+        type: string
+      evidenceRequestedNotes:
+        description: Details of additional evidence required.
+        type: string
+      originalTransaction:
+        $ref: '#/definitions/OriginalTransaction'
+      reason:
+        $ref: '#/definitions/CompositeReason'
+      responseDueDate:
+        type: string
+        format: date-time
+      processorNotes:
+        type: array
+        items:
+          type: string
+      createdOn:
+        type: string
+        format: date-time
+
+  ActionPatchRequest:
+    type: object
+    properties:
+      action:
+        type: string
+        description: The action to be patched.
+        enum: *DISPUTE_ACTION
+
+  FinalDispositionPatchRequest:
+    type: object
+    properties:
+      finalDisposition:
+        description: Dispute final disposition.
+        $ref: '#/definitions/FinalDisposition'
+      triggeredBy:
+        type: string
+        description: Enum to decide where this update is triggered from.
+        enum:
+          - CRM
+          - EVENT
+
+  FinalDisposition:
+    type: object
+    properties:
+      disposition:
+        type: string
+        description: The final disposition to be patched.
+        enum: *DISPUTE_FINAL_DISPOSITION
+      dispositionReason:
+        description: Final disposition reason.
+        type: string
+
+  StatusPatchRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          description: The status to be patched.
+          enum:
+            - ADDITIONAL_EVIDENCE_REQUESTED
+            - CLOSED
+            - EVIDENCE_RECEIVED
+            - EVIDENCE_REQUESTED
+            - EVIDENCE_SUBMITTED
+        evidenceRequestedNotes:
+          type: string
+          description: Details of additional evidences requested.
+
+  PortalWizardStatePatchRequest:
+    type: object
+    required:
+      - portalWizardState
+    properties:
+      portalWizardState:
+        type: string
+        description: Portal Wizard State to be patched.
+
+  FollowUpDatesPatchRequest:
+    type: object
+    properties:
+      followUpDate:
+        type: string
+        format: date-time
+        description: FollowUpDate to be patched.
+      agentFollowUpDate:
+        type: string
+        format: date-time
+        description: Agent FollowUpDate to be patched.
+      merchantDueDate:
+        type: string
+        format: date-time
+        description: Merchant Due Date to be patched.
+
+  WorkflowStatusPatchRequest:
+    type: object
+    properties:
+      disputeWorkflow:
+        type: string
+        description: Dispute workflow to be patched.
+        enum: *DISPUTE_WORKFLOW
+
+  CompositeDisputeEvent:
+    type: object
+    description: Represents singe dispute event.
+    required:
+      - type
+      - createdOn
+    properties:
+      type:
+        description: Dispute event type.
+        type: string
+        enum:
+          - ADDITIONAL_EVIDENCE_REQUESTED
+          - EVIDENCE_REQUESTED
+          - EVIDENCE_RECEIVED
+          - EVIDENCE_SUBMITTED
+          - DISPUTE_ACCEPTED
+      disputeWorkflow:
+        description: Dispute event status.
+        type: string
+        enum: *DISPUTE_WORKFLOW
+      createdOn:
+        type: string
+        format: date-time
+      evidence:
+        description: Dispute event evidence.
+        $ref: '#/definitions/CompositeEvidenceResponse'
+
+  Page:
+    description: Pagination support
+    properties:
+      limit:
+        type: integer
+        format: int32
+        description: Number of items to retrieve.
+      offset:
+        type: integer
+        format: int32
+        description: Position in pagination.
+      count:
+        type: integer
+        format: int32
+        description: Number of items available.
+
+  Meta:
+    description: Response metadata
+    properties:
+      page:
+        $ref: '#/definitions/Page'
+
+  RestEntity:
+    allOf:
+      - type: object
+        discriminator: "restEntityType" # required for inheritance to work
+        properties:
+          id:
+            type: string
+            maxLength: 64
+          meta:
+            $ref: '#/definitions/EntityMeta'
+
+  EntityMeta:
+    description: Meta data that belongs to a single entity being returned
+    properties:
+      createdOn:
+        type: string
+        format: date-time
+      modifiedOn:
+        type: string
+        format: date-time
+
+  StatusChange:
+    type: object
+    properties:
+      status:
+        type: string
+      reason:
+        type: string
+      changeDate:
+        type: string
+        format: date-time
+
+  RestResponse:
+    type: object
+    discriminator: "restResponse" # required for inheritance to work
+    properties:
+      _meta:
+        $ref: '#/definitions/Meta'
+
+  Errors:
+    type: object
+
+  FileContentResponse:
+    description: File content response
